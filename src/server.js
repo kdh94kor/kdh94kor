@@ -1,6 +1,7 @@
 import http from "http";
-import WebSocket from "ws";
+import {Server} from "socket.io";
 import express from "express";
+import { instrument } from "@socket.io/admin-ui";
 
 const app = express();
 
@@ -13,21 +14,86 @@ app.get("/",(req,res) => res.render("home"));
 
 const handleListen = () => console.log('Listening on http://localhost:3000');
 
-const server = http.createServer(app);
-
-const wss = new WebSocket.Server({server});
-
-// Vinila JS
-// function handleConnection(socket){
-//     console.log(socket);
-// }
-
-wss.on("connection",(socket) =>{
-    console.log("Connected to Brwser ✔");
-    socket.on("close",() =>console.log("Disconnected from Browser X"));
-    socket.on("message",(message) =>{
-        console.log(message.toString("utf-8"));
-    })
-    socket.send("hello!");
+const httpServer = http.createServer(app);
+const wsServer = new Server(httpServer,{
+    cors: {
+        origin: ["https://admin.socket.io"],
+        credentials: true,
+    },
 });
-server.listen(3000,handleListen);
+instrument(wsServer, {
+    auth: false,
+});
+
+
+function publicRooms(){
+
+    const {
+        sockets: {
+            adapter: {sids, rooms},
+            // const sids = wsServer.socket.adapter.sids;
+            // const rooms = wsServer.socket.adapter.rooms;
+        },
+    } = wsServer;
+    const publicRooms = [];
+    rooms.forEach((_, key) => {
+        if(sids.get(key) === undefined){
+            publicRooms.push(key);
+        };
+    });
+    return publicRooms;
+};
+
+function countRoom(roomName){
+    return wsServer.sockets.adapter.rooms.get(roomName)?.size;
+}
+
+
+wsServer.on("connection", (socket) => {
+    socket["nickname"] = "Anon";
+    socket.onAny((event) =>{
+        console.log(`Socket Event:${event}`);
+    });
+
+    //입장
+    socket.on("enter_room", (roomName, done) =>{
+        console.log(`방이름 : ${roomName}`);
+        socket.join(roomName);
+        done();
+        socket.to(roomName).emit("welcome", socket.nickname, countRoom(roomName));
+        wsServer.sockets.emit("room_change", publicRooms()); //모든 소켓에 메세지 보냄
+    });
+
+    // 끊기기 전
+    socket.on("disconnecting", () =>{
+        socket.rooms.forEach(room =>{
+            socket.to(room).emit("bye", socket.nickname, countRoom(room)-1 );
+        });   
+    });     
+
+    socket.on("disconnect", () =>{
+        socket.rooms.forEach(room =>{
+            socket.to(room).emit("logout", socket.nickname);
+        });   
+            wsServer.sockets.emit("room_change", publicRooms());
+    });     
+
+    // 닉네임 지정
+    socket.on("nickname", (nickname) => socket["nickname"] = nickname);
+
+    socket.on("new_message", (msg, roomName, done) =>{
+        console.log(`받은메세지 ${msg}`);
+        console.log(`채팅방 :  ${roomName}`);
+        socket.to(roomName).emit("new_message", `${socket.nickname} : ${msg}`);
+        done();
+    });
+});
+
+
+function onSocketClose(){
+    console.log("Socket Closed");
+}
+
+const sockets = [];
+
+httpServer.listen(3000,handleListen);
