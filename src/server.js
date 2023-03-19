@@ -12,6 +12,7 @@ app.use("/public", express.static(__dirname + "/public"));
 app.get("/",(req,res) => res.render("home"));
 // app.get("/*",(req,res) => res.redirect("home")); // 홈 외 경로를 접속할때 홈으로
 
+
 const handleListen = () => console.log('Listening on http://localhost:3000');
 
 const httpServer = http.createServer(app);
@@ -55,11 +56,29 @@ wsServer.on("connection", (socket) => {
         console.log(`Socket Event:${event}`);
     });
 
+    socket.on("join_room", (roomName) =>{
+        socket.join(roomName);
+        socket.to(roomName).emit("welcome");
+    });
+    
+    socket.on("offer", (offer, roomName)=>{
+        socket.to(roomName).emit("offer", offer, roomName);
+    }); 
+
+    socket.on("answer", (answer, roomName) => {
+        socket.to(roomName).emit("answer", answer);
+    });
+
+    socket.on("ice", (ice, roomName) => {
+        socket.to(roomName).emit("ice", ice);
+    });
+
     //입장
     socket.on("enter_room", (roomName, done) =>{
         console.log(`방이름 : ${roomName}`);
         socket.join(roomName);
         done();
+        
         socket.to(roomName).emit("welcome", socket.nickname, countRoom(roomName));
         wsServer.sockets.emit("room_change", publicRooms()); //모든 소켓에 메세지 보냄
     });
